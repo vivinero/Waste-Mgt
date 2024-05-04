@@ -72,6 +72,29 @@ exports.signUp = async (req, res) => {
     }
 }
 
+exports.verifyUser = async (req,res)=>{
+    try{
+       
+          const  id = req.params.id
+          const token = req.params.token
+          
+          await jwt.verify(token, process.env.jwtSecret )
+
+       const updatedUser = await sellerModel.findByIdAndUpdate(id, {isVerified: true}, {new: true})
+       res.redirect ("https://swiftlaundry-app-beta.vercel.app/VerifyUser")
+
+   
+       res.status(200).json({
+           message:`user with emmail:${updatedUser.email} is now verified`,
+           data: updatedUser
+       })
+    }catch(err){
+       res.status(500).json({
+           error: err.message
+       })
+    } 
+   }
+
 exports.login = async (req, res) => {
     try {
         //go into the body
@@ -102,5 +125,122 @@ exports.login = async (req, res) => {
        res.status(500).json({
             error: error.message
        }) 
+    }
+}
+
+exports.reverifyUser = async (req, res) => {
+    try {
+        const {email} = req.body
+        const newUser = await sellerModel.findOne({email})
+        if (!newUser) {
+           return res.status(400).json({
+            error: `seller with ${newUser.email} does not exist `
+           }) 
+        }
+        // generate token
+        const token = jwt.sign({
+            userId: newUser._id,
+            email: newUser.email,
+            firstName: newUser.firstName,
+            lastName: newUser.lastName
+        }, process.env.jwtSecret, {expiresIn: "6000s"})
+
+        //send verification email to the user
+        const name = `${newUser.firstName.toUpperCase()} . ${newUser.lastName.slice(0,1).toUpperCase()}`
+        const link = `${req.protocol}://${req.get('host')}/verify-user/${newUser.id}/${token}`
+        const html = dynamicHtml(link, name)
+        sendEmail({
+        email:newUser.email,
+        subject:"Click on the button below to verify your email", 
+        html
+        })
+    } catch (error) {
+        res.status(500).json({
+            error: error.message
+       }) 
+    }
+}
+
+exports.signOut = async (req, res)=> {
+    try {
+        const token = req.headers.authorization.split(' ')[1]
+        //check if token exist
+        if (!token) {
+            return res.status(400).json({
+                error: "Authorization failed: token not found"
+            })
+        }
+        // get the user's id
+        const userId = req.user.userId
+        //find the user
+        const user = await sellerModel.findById(userId)
+        //push the user in blacklist and save
+        user.blacklist.push(token)
+        await user.save()
+        //success message
+        res.status(200).json({
+            message: "This user has successfully logged out"
+        })
+    } catch (error) {
+        res.status(400).json({
+            error: error.message
+        })
+    }
+}
+
+exports.forgotPassword = async(req, res)=> {
+    try {
+        const checkUser = await sellerModel.findOne( {email: req.body.email} )
+        if (!checkUser) {
+            return res.status(400).json({
+                error: "Email does not exist"
+            })
+        }else{
+            const name = checkUser.firstName + ' ' + checkUser.lastName
+            const subject = "Kindly reset your password"
+            const link = `http://localhost:${port}/user-reset/${checkUser.id}`
+            const html = resetFunc(name, link)
+            sendEmail({
+                email: checkUser.email,
+                html,
+                subject
+            })
+            return res.status(200).json({
+                message: "Kindly check your email to reset your password",
+            })
+        }
+    } catch (error) {
+        res.status(400).json({
+            error: error.message
+        })
+    }
+}
+
+exports.resetPassword = async(req, res)=> {
+    try {
+        //get id from the params
+        const id = req.params.id
+        //include password in the body
+        const password = req.body.password
+        //check if password exist
+        if (!password) {
+            return res.status(400).json({
+                error: "Password cannot be empty"
+            })
+        }
+    //salt password
+    const saltPass = bcrypt.genSaltSync(12)
+    const hashPass = bcrypt.hashSync(password, saltPass)
+
+    const reset = await sellerModel.findByIdAndUpdate(id, {password: hashPass}, {new: true})
+    //success response
+    res.status(200).json({
+        message: "Password reset successfully"
+    })
+        
+    } catch (error) {
+        res.status(400).json({
+            error: error.message
+        })
     }
 }
